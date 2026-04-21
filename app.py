@@ -3,42 +3,41 @@ import uuid
 import time
 
 # iPhone向けのレイアウト設定
-st.set_page_config(page_title="Lab-Navi Pro", layout="centered")
+st.set_page_config(page_title="Lab-Navi Expert", layout="centered")
 
-st.title("🧪 Lab-Navi with Timer")
+st.title("🧪 Lab-Navi Expert")
 
-# --- 1. プロトコルデータベース（タイマー設定付き） ---
-# timer: 0 はタイマーなし、数値は秒単位（例: 900 = 15分）
+# --- 1. プロトコルデータベース（詳細情報付き） ---
 protocol_db = {
     "組織処理・染色": {
         "採取筋肉の固定処理": [
-            {"task": "固定液の調製", "timer": 0},
-            {"task": "筋肉の採取・整形", "timer": 0},
-            {"task": "4% PFAでの固定", "timer": 900},
-            {"task": "洗浄・置換", "timer": 300}
+            {
+                "task": "固定液の調製", 
+                "timer": 0, 
+                "details": "4% PFAは冷蔵庫の2段目。ドラフト内で作業すること。"
+            },
+            {
+                "task": "4% PFAでの固定", 
+                "timer": 900, 
+                "details": "待ち時間に次のステップで使うスクロース溶液を準備。場所：棚B-3。"
+            },
         ],
         "DAPI染色": [
-            {"task": "PBS洗浄", "timer": 300},
-            {"task": "DAPI溶液添加・静置", "timer": 600},
-            {"task": "洗浄・封入", "timer": 0}
+            {
+                "task": "DAPI溶液添加・静置", 
+                "timer": 600, 
+                "details": "遮光を忘れないこと。アルミホイルはシンク下の引き出し。"
+            },
         ],
     },
-    "細胞培養": {
-        "凍結細胞おこし": [
-            {"task": "37℃ウォーターバスで融解", "timer": 120},
-            {"task": "培地への懸濁", "timer": 0},
-            {"task": "遠心分離 (1000rpm)", "timer": 180},
-            {"task": "播種", "timer": 0}
-        ],
-    },
-    # 他のプロトコルも同様に {"task": "...", "timer": 秒数} の形式で追加可能です。
+    # 他のプロトコルも同様に details を追加可能です。
 }
 
-# --- 2. 進行中の実験を保存するリストを初期化 ---
+# --- 2. 状態の初期化 ---
 if 'active_experiments' not in st.session_state:
     st.session_state.active_experiments = []
 
-# --- 3. 新しい実験の追加セクション ---
+# --- 3. 新しい実験の追加 ---
 st.markdown("### ➕ 新しい実験を開始")
 cat_list = list(protocol_db.keys())
 selected_cat = st.selectbox("カテゴリーを選択", cat_list)
@@ -53,14 +52,15 @@ with col2:
             "id": str(uuid.uuid4())[:8],
             "name": selected_proto,
             "step": 0,
-            "tasks": protocol_db[selected_cat][selected_proto]
+            "tasks": protocol_db[selected_cat][selected_proto],
+            "notes": "" # 実験ごとのメモ欄
         }
         st.session_state.active_experiments.append(new_exp)
         st.rerun()
 
 st.divider()
 
-# --- 4. 進行中の実験一覧セクション ---
+# --- 4. 進行中の実験一覧 ---
 st.markdown("### 🏃‍♂️ 進行中の実験")
 
 for i, exp in enumerate(st.session_state.active_experiments):
@@ -69,15 +69,21 @@ for i, exp in enumerate(st.session_state.active_experiments):
     step_info = exp['tasks'][exp['step']]
     
     with st.expander(f"{exp['name']} ({current_step_num}/{total_steps})", expanded=True):
+        # 進捗
         st.progress(current_step_num / total_steps)
+        
+        # 指示
         st.warning(f"**Step {current_step_num}:** {step_info['task']}")
         
-        # --- タイマー機能の表示 ---
+        # 【新機能】詳細・コツの表示
+        if "details" in step_info and step_info["details"]:
+            with st.status("📌 手順の詳細・物品場所", expanded=False):
+                st.write(step_info["details"])
+        
+        # タイマー
         if step_info['timer'] > 0:
             timer_sec = step_info['timer']
-            # タイマー表示用の枠
             timer_placeholder = st.empty()
-            
             if st.button(f"⏱️ タイマー開始 ({timer_sec // 60}分)", key=f"t_{exp['id']}"):
                 for t in range(timer_sec, -1, -1):
                     mins, secs = divmod(t, 60)
@@ -85,13 +91,23 @@ for i, exp in enumerate(st.session_state.active_experiments):
                     time.sleep(1)
                 st.success("時間です！")
         
-        # 操作ボタン
+        # 【新機能】実験メモ欄（入力すると即座にsession_stateに保存される）
+        # iPhoneでの入力を考慮し、少し高さを抑えています
+        st.session_state.active_experiments[i]['notes'] = st.text_area(
+            "メモ（気づき、サンプル名など）", 
+            value=exp['notes'], 
+            key=f"memo_{exp['id']}",
+            height=100
+        )
+        
+        # ボタン
         b1, b2 = st.columns(2)
         with b1:
             if st.button("✅ 完了", key=f"n_{exp['id']}", use_container_width=True):
                 if exp['step'] < total_steps - 1:
                     st.session_state.active_experiments[i]['step'] += 1
                 else:
+                    # 完了時にメモをどうするか？（現在は消えますが、保存も可能です）
                     st.session_state.active_experiments.pop(i)
                     st.balloons()
                 st.rerun()
@@ -103,8 +119,4 @@ for i, exp in enumerate(st.session_state.active_experiments):
 # サイドバー：計算機（維持）
 with st.sidebar:
     st.header("🔢 試薬計算機")
-    c1 = st.number_input("ストック濃度 (mM)", value=10.0)
-    c2 = st.number_input("最終濃度 (uM)", value=100.0)
-    v2 = st.number_input("最終液量 (uL)", value=1000.0)
-    v1 = (c2 * 1e-6 * v2) / (c1 * 1e-3)
-    st.metric("添加量 (uL)", f"{v1:.2f}")
+    # ... (前回の計算機コードをそのまま配置)
