@@ -1,83 +1,80 @@
 import streamlit as st
 import uuid
 import time
+import math
 
-# 数値を 1.0 x 10^6 形式の文字列にする補助関数
-def format_sci(val):
-    if val == 0: return "0"
-    import math
+# LaTeX形式の指数表記にする関数
+def format_sci_latex(val):
+    if val <= 0: return "0"
     exponent = int(math.floor(math.log10(abs(val))))
     coeff = val / (10**exponent)
-    return f"{coeff:.1f} \\times 10^{{{exponent}}}"
+    return f"{coeff:.2f} \\times 10^{{{exponent}}}"
 
 st.set_page_config(page_title="Lab-Navi Pro", layout="centered")
 st.title("🧪 Lab-Navi Expert")
 
-# --- サイドバー：高度な計算機 ---
+# --- サイドバー：セルカウント・まき直し専用計算機 ---
 with st.sidebar:
     st.header("🧮 Lab Calculator")
-    calc_mode = st.radio("モード選択", ["試薬希釈", "セルカウント・まき直し"])
+    st.subheader("🧫 セルカウント・まき直し")
     
-    if calc_mode == "試薬希釈":
-        st.subheader("🔢 試薬希釈計算")
-        c1 = st.number_input("ストック濃度 (mM)", value=10.0)
-        c2 = st.number_input("最終濃度 (uM)", value=100.0)
-        v2 = st.number_input("最終液量 (uL)", value=1000.0)
-        v1 = (c2 * 1e-6 * v2) / (c1 * 1e-3)
-        st.metric("添加量 (uL)", f"{v1:.2f}")
+    # --- Step 1: 現在の細胞数を確認 ---
+    st.markdown("---")
+    st.caption("Step 1: 現在の細胞数")
+    count_A = st.number_input("カウント数 A (個/0.1mm^3)", value=50.0)
+    vol_B = st.number_input("回収溶液量 B (mL)", value=5.0)
+    total_cells = count_A * vol_B * 10000
+    st.latex(f"現在の総細胞数: {format_sci_latex(total_cells)}")
 
+    # --- Step 2: 目標の設定（視覚的入力） ---
+    st.markdown("---")
+    st.caption("Step 2: 1枚あたりの目標数 D")
+    c_col, e_col = st.columns([2, 1])
+    with c_col:
+        d_coeff = st.number_input("係数", value=1.0, key="d_c")
+    with e_col:
+        d_expo = st.number_input("指数 10^x", value=5, step=1, key="d_e")
+    target_D = d_coeff * (10**d_expo)
+    st.latex(f"目標: {format_sci_latex(target_D)} \, [cells/dish]")
+
+    # --- Step 3: Dish設定 ---
+    st.markdown("---")
+    st.caption("Step 3: Dish設定")
+    dish_info = {"3 cm": 2.0, "6 cm": 4.0, "10 cm": 8.0}
+    selected_size = st.selectbox("サイズ", list(dish_info.keys()))
+    dish_count = st.number_input("枚数", value=1, min_value=1)
+    
+    # 必要な総細胞数
+    required_cells = target_D * dish_count
+    st.latex(f"必要総数: {format_sci_latex(required_cells)}")
+    
+    if required_cells > total_cells:
+        st.error("⚠️ 細胞が足りません！")
     else:
-        st.subheader("🧫 セルカウント・まき直し")
-        
-        # Step 1: セルカウント
+        # --- Step 4: まきやすさ（分注量）の指定 ---
+        # 1枚あたり何uLずつ分注したいか（これで目標濃度Cが決まる）
         st.markdown("---")
-        st.caption("Step 1: セルカウント")
-        count_A = st.number_input("カウント数 A (個/0.1mm^3)", value=50.0)
-        vol_B = st.number_input("回収溶液量 B (mL)", value=5.0)
-        total_cells = count_A * vol_B * 10000
-        st.latex(f"総細胞数: {format_sci(total_cells)} \, [cells]")
+        st.caption("Step 4: まきやすさの調整")
+        dispense_uL = st.slider("1枚あたりの細胞溶液分注量 (uL)", 50, 500, 200, step=10)
         
-        # Step 2: 懸濁
-        st.markdown("---")
-        st.caption("Step 2: 懸濁（細胞溶液の作製）")
-        target_C = st.number_input("目標濃度 C (個/mL)", value=1000000.0, format="%.e")
-        st.latex(f"目標濃度: {format_sci(target_C)} \, [cells/mL]")
+        # 目標濃度 C の計算: C = D / (分注量 mL)
+        target_C = target_D / (dispense_uL / 1000)
+        # 必要な懸濁用培地量: V = 総細胞数 / C
+        suspend_vol = total_cells / target_C
         
-        needed_media_vol = total_cells / target_C
-        st.info(f"**細胞を懸濁する培地量:** {needed_media_vol:.2f} mL")
-        
-        # Step 3: まき直し設定
-        st.markdown("---")
-        st.caption("Step 3: 各Dishへのまき直し")
-        
-        dish_info = {
-            "3 cm": {"vol": 2.0},
-            "6 cm": {"vol": 4.0},
-            "10 cm": {"vol": 8.0}
-        }
-        selected_size = st.selectbox("Dishサイズを選択", list(dish_info.keys()))
-        dish_count = st.number_input("まくDishの枚数", value=1, min_value=1)
-        target_D = st.number_input("1枚あたりの目標細胞数 D (個)", value=100000.0, format="%.e")
-        st.latex(f"目標数/dish: {format_sci(target_D)}")
-        
-        # 分注量の計算
-        vol_per_dish_uL = (target_D / target_C) * 1000 
-        total_seeding_vol_mL = (vol_per_dish_uL * dish_count) / 1000
-        
-        # 安全チェック
-        if total_seeding_vol_mL > needed_media_vol:
-            st.error("⚠️ エラー: 回収した細胞が足りません！")
-        else:
-            st.success(f"**1枚あたりの細胞溶液:** {vol_per_dish_uL:.1f} uL")
-            
-            method = st.radio("まき方", ["方法1: 規定量に上乗せ", "方法2: 合計量を合わせる"])
-            base_vol = dish_info[selected_size]["vol"]
-            
-            if method == "方法1: 規定量に上乗せ":
-                st.write(f"✅ 各Dishに **{base_vol} mL** の培地を入れ、そこに細胞溶液を **{vol_per_dish_uL:.1f} uL** ずつ加えてください。")
-            else:
-                base_media_per_dish = base_vol - (vol_per_dish_uL / 1000)
-                st.write(f"✅ 各Dishに培地を **{base_media_per_dish:.3f} mL** 入れ、そこに細胞溶液を **{vol_per_dish_uL:.1f} uL** 加えて合計 **{base_vol} mL** にしてください。")
+        st.latex(f"算出された目標濃度 C: {format_sci_latex(target_C)} \, [cells/mL]")
+        st.success(f"✅ **培地 {suspend_vol:.3f} mL** で細胞を溶かしてください。")
 
-# --- メイン画面：プロトコル表示 (以前のロジックを継続) ---
-# ... (ここに進行中実験の表示コードが入ります)
+        # --- Step 5: 方法別指示 ---
+        st.markdown("---")
+        method = st.radio("まき方", ["方法1: 規定量に上乗せ", "方法2: 合計量を合わせる"])
+        base_vol_mL = dish_info[selected_size]
+        
+        if method == "方法1: 規定量に上乗せ":
+            st.write(f"👉 各Dishに培地 **{base_vol_mL} mL** を入れ、そこに細胞溶液を **{dispense_uL} uL** 加える。")
+        else:
+            base_media_per_dish = base_vol_mL - (dispense_uL / 1000)
+            st.write(f"👉 各Dishに培地 **{base_media_per_dish:.3f} mL** を入れ、そこに細胞溶液を **{dispense_uL} uL** 加えて合計 **{base_vol_mL} mL** にする。")
+
+# --- メイン画面：プロトコル表示（維持） ---
+# ... (以前のコードをそのまま使用)
